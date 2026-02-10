@@ -360,20 +360,17 @@ import os
 
 def upload_to_github():
     try:
-        # --- CRITICAL ADDITION ---
-        # This tells Python to "move" into the folder where the script lives
         os.chdir(base_path) 
-        # -------------------------
-
         print("Syncing with GitHub...")
-        # We use shell=True to make it more stable on Windows
-        subprocess.run('git add "Waterjet Efficiency Shiftwise.xlsx"', shell=True, check=True)
+        
+        # We add --force to the push command
+        subprocess.run('git add .', shell=True, check=True)
         subprocess.run('git commit -m "Auto-update production data"', shell=True, check=True)
-        subprocess.run('git push origin main', shell=True, check=True)
+        subprocess.run('git push origin main --force', shell=True, check=True) # Added --force
+        
         print("✅ Online Dashboard Updated Successfully.")
         
     except subprocess.CalledProcessError as e:
-        # Error 128 usually means it still can't find the .git folder
         print(f"❌ GitHub Upload Failed. Error code: {e.returncode}")
     except Exception as e:
         print(f"❌ An unexpected error occurred: {e}")
