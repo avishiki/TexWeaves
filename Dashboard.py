@@ -7,7 +7,7 @@ st.set_page_config(page_title="Production Dashboard", layout="wide")
 st.title("🏭 Waterjet Production Dashboard")
 
 # Load the file
-file_path = 'Waterjet Efficiency.xlsx'
+file_path = 'Waterjet Efficiency Shiftwise.xlsx'
 
 try:
     # 1. KEY TAKEAWAYS
