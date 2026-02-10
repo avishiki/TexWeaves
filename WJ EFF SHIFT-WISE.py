@@ -356,15 +356,19 @@ send_alerts()
 send_prod_summary()
 
 import os
+import subprocess
 
 def upload_to_github():
     try:
-        # These commands tell your computer to upload the changes to GitHub
-        os.system('git add "Waterjet Efficiency LU.xlsx"')
-        os.system('git commit -m "Auto-update production data"')
-        os.system('git push origin main')
-        print("Data pushed to Online Dashboard successfully.")
-    except Exception as e:
-        print(f"GitHub Upload Failed: {e}")
+        # We use subprocess.run for better error checking
+        print("Syncing with GitHub...")
+        subprocess.run(['git', 'add', 'Waterjet Efficiency.xlsx'], check=True)
+        subprocess.run(['git', 'commit', '-m', 'Auto-update production data'], check=True)
+        subprocess.run(['git', 'push', 'origin', 'main'], check=True)
+        print("✅ Online Dashboard Updated Successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ GitHub Upload Failed. Error code: {e.returncode}")
+    except FileNotFoundError:
+        print("❌ Git is not installed or not in Windows PATH.")
 
 upload_to_github()
