@@ -303,7 +303,7 @@ def upload_to_github():
 
         print("Syncing with GitHub...")
         # We use shell=True to make it more stable on Windows
-        subprocess.run('git add "Waterjet Efficiency Shiftwise.xlsx"', shell=True, check=True)
+        subprocess.run('git add .', shell=True, check=True)
         subprocess.run('git commit -m "Auto-update production data"', shell=True, check=True)
         subprocess.run('git push origin main', shell=True, check=True)
         print("✅ Online Dashboard Updated Successfully.")
