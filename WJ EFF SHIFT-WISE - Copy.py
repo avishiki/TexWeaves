@@ -261,7 +261,7 @@ with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
 
         
         # Special format for Pending Meters
-        warn_fmt = workbook.add_format({'num_format': '0', 'font_color': "#649FAD", 'bg_color': '#FFC7CE'})
+        warn_fmt = workbook.add_format({'num_format': '0'})
         ws_status.set_column('G:G', 15, warn_fmt) # Column G is Pending Meters
         
         for i, val in enumerate(beam_status_output.columns):

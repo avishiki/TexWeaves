@@ -27,7 +27,7 @@ try:
     
     # Color Pending Meters (Red if low)
     def color_pending(val):
-        color = 'red' if val < 100 else 'white'
+        color = 'red' if val < 1000 else 'black'
         return f'color: {color}'
 
     st.dataframe(df_beam.style.applymap(color_pending, subset=['Pending Meters']), use_container_width=True)
