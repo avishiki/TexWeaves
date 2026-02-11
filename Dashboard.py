@@ -120,7 +120,7 @@ try:
 
     # Footnotes for Stock
     num_beams = len(filtered_stock)
-    total_stock_meters = filtered_stock['Warp Meters'].sum()
+    total_stock_meters = filtered_stock['Warp Meter'].sum()
     st.markdown(f'<p class="footnote">Number of Beams: {num_beams} | Beam Meter: {int(total_stock_meters)} Meters</p>', unsafe_allow_html=True)
 
     st.divider()
