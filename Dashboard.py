@@ -9,7 +9,7 @@ st.markdown("""
     <style>
     .footnote { font-size: 1.2rem; font-weight: bold; color: #1f77b4; margin-top: -15px; }
     </style>
-    """, unsafe_allow_name=True)
+    """, unsafe_allow_name_html=True)
 
 # Load the file
 file_path = 'Waterjet Efficiency Shiftwise.xlsx'
@@ -95,7 +95,7 @@ try:
     # Footnotes for Beam Status
     nom_running = filtered_beam['Mc no'].nunique()
     total_pending = filtered_beam['Pending Meters'].sum()
-    st.markdown(f'<p class="footnote">NOM Running: {nom_running} | Warp Pending: {int(total_pending)} Meters</p>', unsafe_allow_name=True)
+    st.markdown(f'<p class="footnote">NOM Running: {nom_running} | Warp Pending: {int(total_pending)} Meters</p>', unsafe_allow_name_html=True)
 
     st.divider()
 
@@ -112,7 +112,7 @@ try:
     # Footnotes for Stock
     num_beams = len(filtered_stock)
     total_stock_meters = filtered_stock['Meters'].sum()
-    st.markdown(f'<p class="footnote">Number of Beams: {num_beams} | Beam Meter: {int(total_stock_meters)} Meters</p>', unsafe_allow_name=True)
+    st.markdown(f'<p class="footnote">Number of Beams: {num_beams} | Beam Meter: {int(total_stock_meters)} Meters</p>', unsafe_allow_name_html=True)
 
     st.divider()
 
