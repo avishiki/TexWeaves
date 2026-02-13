@@ -294,6 +294,14 @@ print(f"Excel Generated: {output_path}")
 
 # --- 8. WHATSAPP ALERTS (SHIFT-WISE) ---
 
+import webbrowser
+
+def warmup_whatsapp():
+    print("Warming up WhatsApp Web...")
+    # This just opens the browser so it's ready in the background
+    webbrowser.open("https://web.whatsapp.com")
+    time_lib.sleep(25) # Give it 25 seconds to fully load the chats
+
 def send_alerts():
     recipients = ["+919638832321"]
     # Filter only for current shift
@@ -321,7 +329,7 @@ def send_alerts():
         msg += "\n*NO BHIDAN FOR NEXT 5 DAYS*\n"        
 
     for p in recipients:
-        kit.sendwhatmsg_instantly(p, msg, wait_time=20, tab_close=True)
+        kit.sendwhatmsg_instantly(p, msg, wait_time=25, tab_close=True)
         time_lib.sleep(15)
 
 def send_prod_summary():
@@ -354,6 +362,7 @@ def send_prod_summary():
         kit.sendwhatmsg_instantly(p, msg, wait_time=25, tab_close=True)
         time_lib.sleep(10)
 
+warmup_whatsapp()
 send_alerts()
 send_prod_summary()
 
