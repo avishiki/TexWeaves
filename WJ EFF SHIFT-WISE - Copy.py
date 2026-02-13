@@ -145,59 +145,108 @@ final_takeaway = final_takeaway.sort_values(by=['Date_Obj', 'Quality'], ascendin
 final_takeaway_output = final_takeaway.drop(columns=['Date_Obj']).rename(columns={'Date': 'DATE', 'Quality': 'QUALITY'})
 
 
-# --- 5b. BEAM BOOK & STOCK CALCULATIONS ---
+# --- 5b. ADVANCED BEAM BOOK & RELOADING CALCULATIONS ---
 if os.path.exists(beam_book_file):
     df_bb_raw = pd.read_excel(beam_book_file)
     
-    # Standardize Dates
-    df_bb_raw['Loading Date Obj'] = pd.to_datetime(df_bb_raw['Loading Date'], format='%d-%m-%y', errors='coerce')
-    df_bb_raw['Bhidan Date Obj'] = pd.to_datetime(df_bb_raw['Bhidan Date'], format='%d-%m-%y', errors='coerce')
+    # 1. Standardize All Date Columns
+    date_cols = ['Loading Date', 'Bhidan Date', 'Re-Loading Date', 'Re-Bhidan Date']
+    for col in date_cols:
+        df_bb_raw[f'{col} Obj'] = pd.to_datetime(df_bb_raw[col], format='%d-%m-%y', errors='coerce')
 
-    # --- CATEGORY A: BEAM STATUS (Active on Machine) ---
-    # Logic: Has a Loading Date BUT No Bhidan Date
-    status_mask = df_bb_raw['Loading Date Obj'].notna() & df_bb_raw['Bhidan Date Obj'].isna()
-    df_status = df_bb_raw[status_mask].copy()
+    def calculate_cumulative_received(row):
+        total_received = 0
+        
+        # --- Run 1: Primary Machine ---
+        if pd.notna(row['Loading Date Obj']):
+            m1 = row['Machine Number']
+            start1 = row['Loading Date Obj']
+            end1 = row['Bhidan Date Obj']
+            
+            mask1 = (merged['Machine Number'] == m1) & (merged['Date_Obj'] >= start1)
+            if pd.notna(end1):
+                mask1 &= (merged['Date_Obj'] <= end1)
+            
+            total_received += merged.loc[mask1, 'Prod_Meter'].sum()
 
-    def calc_received(row):
-        m_num = row['Machine Number']
-        load_date = row['Loading Date Obj']
-        # Filter main production data (merged) for this machine from Loading Date onwards
-        mask = (merged['Machine Number'] == m_num) & (merged['Date_Obj'] >= load_date)
-        return merged.loc[mask, 'Prod_Meter'].sum()
+        # --- Run 2: Re-Loaded Machine ---
+        # Logic: Only calculate if Re-Loading is valid (>= previous Bhidan)
+        if pd.notna(row['Re-Loading Date Obj']):
+            # Validation: Reloading Date must be >= Bhidan Date
+            if pd.isna(row['Bhidan Date Obj']) or (row['Re-Loading Date Obj'] >= row['Bhidan Date Obj']):
+                m2 = row['Re-Machine Number']
+                start2 = row['Re-Loading Date Obj']
+                end2 = row['Re-Bhidan Date Obj']
+                
+                mask2 = (merged['Machine Number'] == m2) & (merged['Date_Obj'] >= start2)
+                if pd.notna(end2):
+                    mask2 &= (merged['Date_Obj'] <= end2)
+                
+                total_received += merged.loc[mask2, 'Prod_Meter'].sum()
+        
+        return total_received
+
+    # Apply Cumulative Production Calculation
+    df_bb_raw['Received Meters'] = df_bb_raw.apply(calculate_cumulative_received, axis=1)
+    df_bb_raw['Pending Meters'] = df_bb_raw['Warp Meter'] - df_bb_raw['Received Meters']
+    
+    # Shortage Rule: If Pending < 7% of Warp Meter, it's considered Empty/Complete
+    df_bb_raw['Is_Complete'] = df_bb_raw['Pending Meters'] < (0.07 * df_bb_raw['Warp Meter'])
+
+    # --- CATEGORY A: BEAM STATUS (Currently Running) ---
+    # Logic: (Loaded but no Bhidan) OR (Re-Loaded but no Re-Bhidan)
+    active_mask = (
+        (df_bb_raw['Loading Date Obj'].notna() & df_bb_raw['Bhidan Date Obj'].isna()) |
+        (df_bb_raw['Re-Loading Date Obj'].notna() & df_bb_raw['Re-Bhidan Date Obj'].isna())
+    )
+    df_status = df_bb_raw[active_mask].copy()
 
     if not df_status.empty:
-        df_status['Received Meters'] = df_status.apply(calc_received, axis=1)
-        df_status['Pending Meters'] = df_status['Warp Meter'] - df_status['Received Meters']
-        
-        # Rounding
+        # Determine current machine and loading date for display
+        def get_current_info(row):
+            if pd.notna(row['Re-Loading Date Obj']) and pd.isna(row['Re-Bhidan Date Obj']):
+                return row['Re-Machine Number'], row['Re-Loading Date']
+            return row['Machine Number'], row['Loading Date']
+
+        df_status[['Curr_Mc', 'Curr_Load']] = df_status.apply(
+            lambda x: pd.Series(get_current_info(x)), axis=1
+        )
+
         df_status['Received Meters'] = df_status['Received Meters'].round(0).astype(int)
         df_status['Pending Meters'] = df_status['Pending Meters'].round(0).astype(int)
         
-        # CLEAN DATES: Convert to dd/mm/yyyy string
-        df_status['Loading Date'] = pd.to_datetime(df_status['Loading Date']).dt.strftime('%d/%m/%Y')
-        
+        # Format Date for Display
+        df_status['Curr_Load_Str'] = pd.to_datetime(df_status['Curr_Load']).dt.strftime('%d/%m/%Y')
+
         beam_status_output = df_status[[
-            'Machine Number', 'Loading Date', 'Beam No', 'Quality', 
+            'Curr_Mc', 'Curr_Load_Str', 'Beam No', 'Quality', 
             'Warp Meter', 'Received Meters', 'Pending Meters'
-        ]].rename(columns={'Machine Number': 'Mc no'})
+        ]].rename(columns={'Curr_Mc': 'Mc no', 'Curr_Load_Str': 'Loading Date'})
         
         beam_status_output = beam_status_output.sort_values(by='Mc no')
     else:
         beam_status_output = pd.DataFrame()
 
     # --- CATEGORY B: BEAM STOCK (In Warehouse) ---
-    # Logic: No Loading Date AND No Bhidan Date
-    stock_mask = df_bb_raw['Loading Date Obj'].isna() & df_bb_raw['Bhidan Date Obj'].isna()
+    # Logic: 
+    # 1. Never loaded AND No Bhidan
+    # 2. OR: Finished (Bhidan) but NOT Re-Loaded AND NOT Complete (>7% left)
+    stock_mask = (
+        (df_bb_raw['Loading Date Obj'].isna() & df_bb_raw['Bhidan Date Obj'].isna()) |
+        (df_bb_raw['Bhidan Date Obj'].notna() & df_bb_raw['Re-Loading Date Obj'].isna() & ~df_bb_raw['Is_Complete'])
+    )
     df_stock = df_bb_raw[stock_mask].copy()
     
     if not df_stock.empty:
-        beam_stock_output = df_stock[['Date', 'Beam No', 'Warp Meter', 'Quality']].copy()
+        # If it was previously run, show the Date it came off the machine
+        df_stock['Stock_Date'] = df_stock['Bhidan Date'].fillna(df_stock['Date'])
+        df_stock['Stock_Date_Str'] = pd.to_datetime(df_stock['Stock_Date']).dt.strftime('%d/%m/%Y')
         
-        # CLEAN DATES: Convert to dd/mm/yyyy string
-        beam_stock_output['Date'] = pd.to_datetime(beam_stock_output['Date']).dt.strftime('%d/%m/%Y')
+        # For stock, the "Meter" column should show what is actually left (Pending Meters)
+        beam_stock_output = df_stock[['Stock_Date_Str', 'Beam No', 'Pending Meters', 'Quality']].copy()
+        beam_stock_output.columns = ['Date', 'Beam No', 'Warp Meter', 'Quality']
     else:
         beam_stock_output = pd.DataFrame()
-    
 
 else:
     print("Warning: BEAM BOOK.xlsx not found.")
