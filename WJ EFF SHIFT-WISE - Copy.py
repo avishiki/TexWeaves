@@ -145,108 +145,59 @@ final_takeaway = final_takeaway.sort_values(by=['Date_Obj', 'Quality'], ascendin
 final_takeaway_output = final_takeaway.drop(columns=['Date_Obj']).rename(columns={'Date': 'DATE', 'Quality': 'QUALITY'})
 
 
-# --- 5b. ADVANCED BEAM BOOK & RELOADING CALCULATIONS ---
+# --- 5b. BEAM BOOK & STOCK CALCULATIONS ---
 if os.path.exists(beam_book_file):
     df_bb_raw = pd.read_excel(beam_book_file)
     
-    # 1. Standardize All Date Columns
-    date_cols = ['Loading Date', 'Bhidan Date', 'Re-Loading Date', 'Re-Bhidan Date']
-    for col in date_cols:
-        df_bb_raw[f'{col} Obj'] = pd.to_datetime(df_bb_raw[col], format='%d-%m-%y', errors='coerce')
+    # Standardize Dates
+    df_bb_raw['Loading Date Obj'] = pd.to_datetime(df_bb_raw['Loading Date'], format='%d-%m-%y', errors='coerce')
+    df_bb_raw['Bhidan Date Obj'] = pd.to_datetime(df_bb_raw['Bhidan Date'], format='%d-%m-%y', errors='coerce')
 
-    def calculate_cumulative_received(row):
-        total_received = 0
-        
-        # --- Run 1: Primary Machine ---
-        if pd.notna(row['Loading Date Obj']):
-            m1 = row['Machine Number']
-            start1 = row['Loading Date Obj']
-            end1 = row['Bhidan Date Obj']
-            
-            mask1 = (merged['Machine Number'] == m1) & (merged['Date_Obj'] >= start1)
-            if pd.notna(end1):
-                mask1 &= (merged['Date_Obj'] <= end1)
-            
-            total_received += merged.loc[mask1, 'Prod_Meter'].sum()
+    # --- CATEGORY A: BEAM STATUS (Active on Machine) ---
+    # Logic: Has a Loading Date BUT No Bhidan Date
+    status_mask = df_bb_raw['Loading Date Obj'].notna() & df_bb_raw['Bhidan Date Obj'].isna()
+    df_status = df_bb_raw[status_mask].copy()
 
-        # --- Run 2: Re-Loaded Machine ---
-        # Logic: Only calculate if Re-Loading is valid (>= previous Bhidan)
-        if pd.notna(row['Re-Loading Date Obj']):
-            # Validation: Reloading Date must be >= Bhidan Date
-            if pd.isna(row['Bhidan Date Obj']) or (row['Re-Loading Date Obj'] >= row['Bhidan Date Obj']):
-                m2 = row['Re-Machine Number']
-                start2 = row['Re-Loading Date Obj']
-                end2 = row['Re-Bhidan Date Obj']
-                
-                mask2 = (merged['Machine Number'] == m2) & (merged['Date_Obj'] >= start2)
-                if pd.notna(end2):
-                    mask2 &= (merged['Date_Obj'] <= end2)
-                
-                total_received += merged.loc[mask2, 'Prod_Meter'].sum()
-        
-        return total_received
-
-    # Apply Cumulative Production Calculation
-    df_bb_raw['Received Meters'] = df_bb_raw.apply(calculate_cumulative_received, axis=1)
-    df_bb_raw['Pending Meters'] = df_bb_raw['Warp Meter'] - df_bb_raw['Received Meters']
-    
-    # Shortage Rule: If Pending < 7% of Warp Meter, it's considered Empty/Complete
-    df_bb_raw['Is_Complete'] = df_bb_raw['Pending Meters'] < (0.07 * df_bb_raw['Warp Meter'])
-
-    # --- CATEGORY A: BEAM STATUS (Currently Running) ---
-    # Logic: (Loaded but no Bhidan) OR (Re-Loaded but no Re-Bhidan)
-    active_mask = (
-        (df_bb_raw['Loading Date Obj'].notna() & df_bb_raw['Bhidan Date Obj'].isna()) |
-        (df_bb_raw['Re-Loading Date Obj'].notna() & df_bb_raw['Re-Bhidan Date Obj'].isna())
-    )
-    df_status = df_bb_raw[active_mask].copy()
+    def calc_received(row):
+        m_num = row['Machine Number']
+        load_date = row['Loading Date Obj']
+        # Filter main production data (merged) for this machine from Loading Date onwards
+        mask = (merged['Machine Number'] == m_num) & (merged['Date_Obj'] >= load_date)
+        return merged.loc[mask, 'Prod_Meter'].sum()
 
     if not df_status.empty:
-        # Determine current machine and loading date for display
-        def get_current_info(row):
-            if pd.notna(row['Re-Loading Date Obj']) and pd.isna(row['Re-Bhidan Date Obj']):
-                return row['Re-Machine Number'], row['Re-Loading Date']
-            return row['Machine Number'], row['Loading Date']
-
-        df_status[['Curr_Mc', 'Curr_Load']] = df_status.apply(
-            lambda x: pd.Series(get_current_info(x)), axis=1
-        )
-
+        df_status['Received Meters'] = df_status.apply(calc_received, axis=1)
+        df_status['Pending Meters'] = df_status['Warp Meter'] - df_status['Received Meters']
+        
+        # Rounding
         df_status['Received Meters'] = df_status['Received Meters'].round(0).astype(int)
         df_status['Pending Meters'] = df_status['Pending Meters'].round(0).astype(int)
         
-        # Format Date for Display
-        df_status['Curr_Load_Str'] = pd.to_datetime(df_status['Curr_Load']).dt.strftime('%d/%m/%Y')
-
+        # CLEAN DATES: Convert to dd/mm/yyyy string
+        df_status['Loading Date'] = pd.to_datetime(df_status['Loading Date']).dt.strftime('%d/%m/%Y')
+        
         beam_status_output = df_status[[
-            'Curr_Mc', 'Curr_Load_Str', 'Beam No', 'Quality', 
+            'Machine Number', 'Loading Date', 'Beam No', 'Quality', 
             'Warp Meter', 'Received Meters', 'Pending Meters'
-        ]].rename(columns={'Curr_Mc': 'Mc no', 'Curr_Load_Str': 'Loading Date'})
+        ]].rename(columns={'Machine Number': 'Mc no'})
         
         beam_status_output = beam_status_output.sort_values(by='Mc no')
     else:
         beam_status_output = pd.DataFrame()
 
     # --- CATEGORY B: BEAM STOCK (In Warehouse) ---
-    # Logic: 
-    # 1. Never loaded AND No Bhidan
-    # 2. OR: Finished (Bhidan) but NOT Re-Loaded AND NOT Complete (>7% left)
-    stock_mask = (
-        (df_bb_raw['Loading Date Obj'].isna() & df_bb_raw['Bhidan Date Obj'].isna()) |
-        (df_bb_raw['Bhidan Date Obj'].notna() & df_bb_raw['Re-Loading Date Obj'].isna() & ~df_bb_raw['Is_Complete'])
-    )
+    # Logic: No Loading Date AND No Bhidan Date
+    stock_mask = df_bb_raw['Loading Date Obj'].isna() & df_bb_raw['Bhidan Date Obj'].isna()
     df_stock = df_bb_raw[stock_mask].copy()
     
     if not df_stock.empty:
-        # If it was previously run, show the Date it came off the machine
-        df_stock['Stock_Date'] = df_stock['Bhidan Date'].fillna(df_stock['Date'])
-        df_stock['Stock_Date_Str'] = pd.to_datetime(df_stock['Stock_Date']).dt.strftime('%d/%m/%Y')
+        beam_stock_output = df_stock[['Date', 'Beam No', 'Warp Meter', 'Quality']].copy()
         
-        # For stock, the "Meter" column should show what is actually left (Pending Meters)
-        beam_stock_output = df_stock[['Stock_Date_Str', 'Beam No', 'Pending Meters', 'Quality']].copy()
-        beam_stock_output.columns = ['Date', 'Beam No', 'Warp Meter', 'Quality']
+        # CLEAN DATES: Convert to dd/mm/yyyy string
+        beam_stock_output['Date'] = pd.to_datetime(beam_stock_output['Date']).dt.strftime('%d/%m/%Y')
     else:
         beam_stock_output = pd.DataFrame()
+    
 
 else:
     print("Warning: BEAM BOOK.xlsx not found.")
@@ -339,26 +290,94 @@ with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
 
 print(f"Excel Generated: {output_path}")
 
+# --- 8. WHATSAPP ALERTS (SHIFT-WISE) ---
+
+import webbrowser
+
+def warmup_whatsapp():
+    print("Warming up WhatsApp Web...")
+    # This just opens the browser so it's ready in the background
+    webbrowser.open("https://web.whatsapp.com")
+    time_lib.sleep(25) # Give it 25 seconds to fully load the chats
+
+def send_alerts():
+    recipients = ["+919638832321"]
+    # Filter only for current shift
+    shift_low = full_report[(full_report['Date'] == latest_date_str) & (full_report['Shift'] == latest_shift_str) & (full_report['Active_Ratio'] < 0.90)]
+    shift_stops = full_report[(full_report['Date'] == latest_date_str) & (full_report['Shift'] == latest_shift_str) & (pd.to_numeric(full_report['Stops'], errors='coerce') > 30)]
+
+    msg = f"*📊 {latest_shift_str.upper()} SHIFT ALERTS - {latest_date_str}* 📊\n"
+    if chronic_low_performers:
+        msg += "\n*📉 CHRONIC UNDERPERFORMERS (Last 4 Shifts < 90%)*\n"
+        for m in chronic_low_performers: msg += f"• Machine {m}\n"
+    if not shift_low.empty:
+        msg += f"\n*⚠️ LOW ACTIVITY*\n"
+        for _, r in shift_low.iterrows(): msg += f"• Machine {r['Machine Number']} | {r['Active_Ratio']:.1%} | Stops: {int(r['Stops'])}\n"
+    if not shift_stops.empty:
+        msg += f"\n*🛑 HIGH STOPS*\n"
+        for _, r in shift_stops.iterrows(): msg += f"• Machine {r['Machine Number']} | Stops: {int(r['Stops'])}\n"
+
+    # Machines with less than 100 meters pending are about to finish (Bhidan)
+
+    if not low_pending_list.empty:
+        msg += "\n*🧶 UPCOMING BHIDAN (Pending < 1000m)*\n"
+        for _, r in low_pending_list.iterrows():
+            msg += f"• Machine {r['Mc no']} | Quality: {r['Quality']} | Rem: {r['Pending Meters']}m\n"
+    else:
+        msg += "\n*NO BHIDAN FOR NEXT 5 DAYS*\n"        
+
+    for p in recipients:
+        kit.sendwhatmsg_instantly(p, msg, wait_time=25, tab_close=True)
+        time_lib.sleep(15)
+
+def send_prod_summary():
+    recipients = ["+919638832321"]
+    df = pd.read_excel(output_path, sheet_name='Key Takeaways')
+    latest_data = df[df['DATE'] == latest_date_str]
+    
+    # Match the suffix used in the header renaming
+    sfx = latest_shift_str.upper() 
+    
+    msg = f"*📈 {sfx} SHIFT SUMMARY - {latest_date_str}* 📈\n"
+    
+    for _, r in latest_data.iterrows():
+        # Only include qualities that actually ran in this shift
+        if r[f'PRODUCTION METER ({sfx})'] > 0:
+            msg += f"\n*Qual: {r['QUALITY']} | {r[f'NOM ({sfx})']}*\n"
+            msg += f"• Meter: {int(r[f'PRODUCTION METER ({sfx})'])}\n"
+            msg += f"• Eff: {r[f'TRUE EFFICIENCY (QUALITY) ({sfx})']:.2%}\n"
+            msg += f"• Diff: {r[f'DIFFERENCE ({sfx})']:+.2f}\n"
+    
+    total_prod = latest_data[f'PRODUCTION METER ({sfx})'].sum()
+    total_eff = latest_data[f'TRUE EFFICIENCY (TOTAL) ({sfx})'].iloc[0]
+    
+    msg += f"\n*__________________________*\n"
+    msg += f"*TOTAL {sfx} PROD: {int(total_prod)}*\n"
+    msg += f"*TOTAL {sfx} EFF: {total_eff:.2%}*"
+
+    for p in recipients:
+        print(f"Sending Production Summary to {p}...")
+        kit.sendwhatmsg_instantly(p, msg, wait_time=25, tab_close=True)
+        time_lib.sleep(10)
+
+
 
 import subprocess
 import os
 
 def upload_to_github():
     try:
-        # --- CRITICAL ADDITION ---
-        # This tells Python to "move" into the folder where the script lives
         os.chdir(base_path) 
-        # -------------------------
-
         print("Syncing with GitHub...")
-        # We use shell=True to make it more stable on Windows
+        
+        # We add --force to the push command
         subprocess.run('git add .', shell=True, check=True)
         subprocess.run('git commit -m "Auto-update production data"', shell=True, check=True)
-        subprocess.run('git push origin main', shell=True, check=True)
+        subprocess.run('git push origin main --force', shell=True, check=True) # Added --force
+        
         print("✅ Online Dashboard Updated Successfully.")
         
     except subprocess.CalledProcessError as e:
-        # Error 128 usually means it still can't find the .git folder
         print(f"❌ GitHub Upload Failed. Error code: {e.returncode}")
     except Exception as e:
         print(f"❌ An unexpected error occurred: {e}")
