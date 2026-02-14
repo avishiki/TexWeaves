@@ -190,7 +190,7 @@ if os.path.exists(beam_book_file):
     df_bb_raw['Pending Meters'] = df_bb_raw['Warp Meter'] - df_bb_raw['Received Meters']
     
     # Shortage Rule: If Pending < 7% of Warp Meter, it's considered Empty/Complete
-    df_bb_raw['Is_Complete'] = df_bb_raw['Pending Meters'] < (0.07 * df_bb_raw['Warp Meter'])
+    df_bb_raw['Is_Complete'] = df_bb_raw['Pending Meters'] < (0.10 * df_bb_raw['Warp Meter'])
 
     # --- CATEGORY A: BEAM STATUS (Currently Running) ---
     # Logic: (Loaded but no Bhidan) OR (Re-Loaded but no Re-Bhidan)
@@ -251,7 +251,7 @@ else:
     print("Warning: BEAM BOOK.xlsx not found.")
     beam_status_output = pd.DataFrame()
     beam_stock_output = pd.DataFrame()
-    
+
 # --- 6. CHRONIC PERFORMANCE (4 SHIFT STREAK) ---
 history_df = full_report.sort_values(by=['Machine Number', 'Date_Obj', 'Shift_Rank'], ascending=[True, True, True])
 chronic_low_performers = []
