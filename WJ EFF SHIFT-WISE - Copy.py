@@ -120,29 +120,51 @@ def get_stats(df_subset, suffix):
     return res[['Date', 'Quality', f'NOM ({suffix})', f'PRODUCTION METER ({suffix})', 
                 f'TRUE EFFICIENCY (QUALITY) ({suffix})', f'TRUE EFFICIENCY (TOTAL) ({suffix})', f'DIFFERENCE ({suffix})']]
 
-C_VAL = 18.28
-#Feeds data from Quality Data Excel
-merged = full_report.merge(df_quality_lookup[['Quality', 'Quality Pick']], on='Quality', how='left')
-#Feeds data from Machine Data Excel
-merged = merged.merge(df_machine_lookup[['Machine Number', 'True RPM']], on='Machine Number', how='left')
-# Production Meter(per shift) = 18.28 * RUN RPM * ACTUAL EFFICIENCY / QUALITY PICK
-merged['Prod_Meter'] = (C_VAL * merged['Run RPM'] * merged['Actual Efficiency']) / merged['Quality Pick']
-# True Production Meter(per shift) = 18.28 * TRUE RPM * 1.0 (100% Eff) / QUALITY PICK
-merged['True_Prod_Meter'] = (C_VAL * merged['True RPM']) / merged['Quality Pick']
+# Constants per Shift
+C_DAY = 36.56 * 11 / 24    # Approx 16.756
+C_NIGHT = 36.56 * 13 / 24  # Approx 19.803
 
+# Feeds data from Quality Data Excel
+merged = full_report.merge(df_quality_lookup[['Quality', 'Quality Pick']], on='Quality', how='left')
+# Feeds data from Machine Data Excel
+merged = merged.merge(df_machine_lookup[['Machine Number', 'True RPM']], on='Machine Number', how='left')
+
+# APPLY SHIFT-SPECIFIC CONSTANT
+# Create a temporary column for the constant based on the shift
+merged['C_SHIFT'] = merged['Shift'].map({'Day': C_DAY, 'Night': Night_val if 'Night_val' in locals() else C_NIGHT})
+# Re-handle the case sensitivity just in case
+merged.loc[merged['Shift'].str.lower() == 'day', 'C_SHIFT'] = C_DAY
+merged.loc[merged['Shift'].str.lower() == 'night', 'C_SHIFT'] = C_NIGHT
+
+# Production Meter(per shift) using the row-specific constant
+merged['Prod_Meter'] = (merged['C_SHIFT'] * merged['Run RPM'] * merged['Actual Efficiency']) / merged['Quality Pick']
+
+# True Production Meter(per shift) using the row-specific constant
+merged['True_Prod_Meter'] = (merged['C_SHIFT'] * merged['True RPM']) / merged['Quality Pick']
+
+# Calculate Stats
 total_stats = get_stats(merged, 'TOTAL')
 day_stats = get_stats(merged[merged['Shift'] == 'Day'], 'DAY')
 night_stats = get_stats(merged[merged['Shift'] == 'Night'], 'NIGHT')
 
+# Combine into Wide Format
 final_takeaway = merged[['Date', 'Date_Obj', 'Quality']].drop_duplicates()
-final_takeaway = final_takeaway.merge(total_stats, on=['Date', 'Quality'], how='left').merge(day_stats, on=['Date', 'Quality'], how='left').merge(night_stats, on=['Date', 'Quality'], how='left').fillna(0)
+final_takeaway = (final_takeaway
+                  .merge(total_stats, on=['Date', 'Quality'], how='left')
+                  .merge(day_stats, on=['Date', 'Quality'], how='left')
+                  .merge(night_stats, on=['Date', 'Quality'], how='left')
+                  .fillna(0))
 
+# Convert production meters to integer
 prod_cols = ['PRODUCTION METER (DAY)', 'PRODUCTION METER (NIGHT)', 'PRODUCTION METER (TOTAL)']
 for col in prod_cols:
-    final_takeaway[col] = final_takeaway[col].round(0).astype(int)
+    if col in final_takeaway.columns:
+        final_takeaway[col] = final_takeaway[col].round(0).astype(int)
 
+# Sort and Finalize
 final_takeaway = final_takeaway.sort_values(by=['Date_Obj', 'Quality'], ascending=[False, True])
 final_takeaway_output = final_takeaway.drop(columns=['Date_Obj']).rename(columns={'Date': 'DATE', 'Quality': 'QUALITY'})
+
 
 # --- 5b. ADVANCED BEAM BOOK & RELOADING CALCULATIONS ---
 if os.path.exists(beam_book_file):
