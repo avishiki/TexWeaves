@@ -323,7 +323,7 @@ if os.path.exists(beam_book_file):
         low_pending_list = pd.DataFrame()  
 
     # CREATE MASTER LIST 1-28 to match your screenshot
-    master_machines = pd.DataFrame({'Mc no': range(1, 29)})
+    master_machines = pd.DataFrame({'Mc no': range(1, 40)})
     beam_status_output = master_machines.merge(temp_status, on='Mc no', how='left')
     
     # Fill remaining NaNs with empty strings for a clean Excel look
